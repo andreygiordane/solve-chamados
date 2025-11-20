@@ -1,0 +1,26 @@
+# .gitignore
+# Backend
+backend/node_modules/
+backend/.env
+backend/*.log
+backend/dist/
+backend/build/
+
+# Frontend
+frontend/node_modules/
+frontend/.env
+frontend/dist/
+frontend/build/
+frontend/.next/
+
+# Database
+database/data/
+database/.env
+
+# Geral
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
+coverage/
