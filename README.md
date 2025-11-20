@@ -161,17 +161,12 @@ Módulo de Relatórios
 •	Testes automatizados
 •	Dockerização
 
-🤝 Contribuição
-•	Fork do projeto
-•	Branch para feature (git checkout -b feature/AmazingFeature)
-•	Commit das mudanças (git commit -m 'Add AmazingFeature')
-•	Push para branch (git push origin feature/AmazingFeature)
-•	Pull Request
 
 📄 Licença
 •	Distribuído sob licença MIT. Veja LICENSE para mais informações.
 
 🎉 Sistema 100% funcional com autenticação, gestão de usuários e chamados técnicos!
+
 
 
 
