@@ -14,25 +14,9 @@ class Auth {
         [email]
       );
       
-      const user = result.rows[0];
+      // LÓGICA DE AUTO-RESET REMOVIDA DAQUI
       
-      // Se usuário existe mas não tem hash válido, corrigir automaticamente
-      if (user && (!user.password_hash || user.password_hash.length !== 60)) {
-        console.log(`⚠️ Senha inválida para ${user.email}, corrigindo automaticamente...`);
-        await this.fixUserPassword(user.id, '123456');
-        
-        // Buscar novamente após correção
-        const updatedResult = await pool.query(
-          `SELECT u.*, g.name as group_name 
-           FROM users u 
-           LEFT JOIN groups g ON u.group_id = g.id 
-           WHERE u.email = $1`,
-          [email]
-        );
-        return updatedResult.rows[0];
-      }
-      
-      return user;
+      return result.rows[0];
     } catch (error) {
       console.error('Erro ao buscar usuário por email:', error);
       throw error;
@@ -56,48 +40,83 @@ class Auth {
     }
   }
 
-  // Método para verificar senha (CORRIGIDO - estava faltando)
+  // Verificar senha
   static async verifyPassword(plainPassword, hashedPassword) {
     try {
-      if (!hashedPassword) {
-        console.log('❌ Hash de senha não fornecido');
-        return false;
-      }
-      
-      console.log('🔐 Verificando senha...');
-      console.log('   Senha fornecida:', plainPassword ? '***' : 'vazia');
-      console.log('   Hash no banco:', hashedPassword.substring(0, 20) + '...');
-      
-      const result = await bcrypt.compare(plainPassword, hashedPassword);
-      console.log('   Resultado da comparação:', result);
-      
-      return result;
+      if (!hashedPassword) return false;
+      return await bcrypt.compare(plainPassword, hashedPassword);
     } catch (error) {
       console.error('❌ Erro ao verificar senha:', error);
       return false;
     }
   }
 
-  // Método para criar hash de senha
+  // Criar hash de senha
   static async hashPassword(password) {
+    const saltRounds = 10;
+    return await bcrypt.hash(password, saltRounds);
+  }
+
+  // === NOVOS MÉTODOS DE CONTROLE DE TENTATIVAS ===
+
+  // Incrementar tentativas falhas e bloquear se necessário
+  static async incrementFailedAttempts(userId) {
     try {
-      const saltRounds = 10;
-      const hashedPassword = await bcrypt.hash(password, saltRounds);
-      console.log('🔐 Hash criado:', hashedPassword.substring(0, 20) + '...');
-      return hashedPassword;
+      // 1. Busca tentativas atuais
+      const userResult = await pool.query('SELECT failed_login_attempts FROM users WHERE id = $1', [userId]);
+      const currentAttempts = userResult.rows[0]?.failed_login_attempts || 0;
+      
+      const newAttempts = currentAttempts + 1;
+      let lockoutValue = null;
+      let isLocked = false;
+      
+      // 2. Se chegar a 3 tentativas, define bloqueio
+      if (newAttempts >= 3) {
+        const lockoutTime = new Date();
+        lockoutTime.setMinutes(lockoutTime.getMinutes() + 15); // Bloqueio de 15 min
+        lockoutValue = lockoutTime;
+        isLocked = true;
+      }
+
+      // 3. Atualiza no banco
+      await pool.query(
+        `UPDATE users 
+         SET failed_login_attempts = $1, 
+             lockout_until = $2 
+         WHERE id = $3`,
+        [newAttempts, lockoutValue, userId]
+      );
+
+      return { attempts: newAttempts, locked: isLocked, lockoutUntil: lockoutValue };
     } catch (error) {
-      console.error('❌ Erro ao criar hash:', error);
-      throw error;
+      console.error('Erro ao incrementar tentativas:', error);
+      // Retorna objeto seguro em caso de erro para não travar o fluxo
+      return { attempts: 0, locked: false, lockoutUntil: null }; 
     }
   }
 
-  // Método para criar sessão
+  // Resetar tentativas (usado após login com sucesso)
+  static async resetFailedAttempts(userId) {
+    try {
+      await pool.query(
+        `UPDATE users 
+         SET failed_login_attempts = 0, 
+             lockout_until = NULL 
+         WHERE id = $1`,
+        [userId]
+      );
+    } catch (error) {
+      console.error('Erro ao resetar tentativas:', error);
+    }
+  }
+
+  // ===============================================
+
+  // Criar sessão
   static async createSession(userId) {
     try {
       const sessionToken = crypto.randomBytes(32).toString('hex');
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 horas
-      
-      console.log('📝 Criando sessão para usuário:', userId);
       
       const result = await pool.query(
         `INSERT INTO user_sessions (user_id, session_token, expires_at) 
@@ -106,25 +125,17 @@ class Auth {
         [userId, sessionToken, expiresAt]
       );
       
-      console.log('✅ Sessão criada com sucesso');
       return result.rows[0];
     } catch (error) {
-      console.error('❌ Erro ao criar sessão:', error);
-      
-      // Se a tabela não existir, criar automaticamente
       if (error.message.includes('user_sessions')) {
-        console.log('🔄 Tentando criar tabela user_sessions...');
         await this.createSessionsTable();
-        
-        // Tentar novamente
         return await this.createSession(userId);
       }
-      
       throw error;
     }
   }
 
-  // Método para buscar sessão por token
+  // Buscar sessão por token
   static async findSessionByToken(token) {
     try {
       const result = await pool.query(
@@ -137,28 +148,18 @@ class Auth {
       );
       return result.rows[0];
     } catch (error) {
-      console.error('❌ Erro ao buscar sessão:', error);
       return null;
     }
   }
 
-  // Método para deletar sessão
+  // Deletar sessão
   static async deleteSession(token) {
-    try {
-      await pool.query(
-        'DELETE FROM user_sessions WHERE session_token = $1',
-        [token]
-      );
-      console.log('✅ Sessão deletada');
-    } catch (error) {
-      console.error('❌ Erro ao deletar sessão:', error);
-    }
+    await pool.query('DELETE FROM user_sessions WHERE session_token = $1', [token]);
   }
 
-  // Método para limpar sessões expiradas
+  // Limpar sessões expiradas
   static async cleanupExpiredSessions() {
     try {
-      // Verificar se a tabela existe antes de tentar limpar
       const tableExists = await pool.query(`
         SELECT EXISTS (
           SELECT FROM information_schema.tables 
@@ -166,147 +167,73 @@ class Auth {
         )
       `);
       
-      if (!tableExists.rows[0].exists) {
-        console.log('⚠️ Tabela user_sessions não existe, pulando limpeza...');
-        return;
-      }
-      
-      const result = await pool.query(
-        'DELETE FROM user_sessions WHERE expires_at <= NOW() RETURNING *'
-      );
-      
-      if (result.rows.length > 0) {
-        console.log(`🧹 Limpas ${result.rows.length} sessões expiradas`);
+      if (tableExists.rows[0].exists) {
+        await pool.query('DELETE FROM user_sessions WHERE expires_at <= NOW()');
       }
     } catch (error) {
-      console.error('❌ Erro ao limpar sessões expiradas:', error.message);
+      console.error('Erro ao limpar sessões:', error.message);
     }
   }
 
-  // Método para atualizar último login
+  // Atualizar último login
   static async updateLastLogin(userId) {
     try {
-      await pool.query(
-        'UPDATE users SET last_login = NOW() WHERE id = $1',
-        [userId]
-      );
-      console.log('✅ Último login atualizado para usuário:', userId);
+      await pool.query('UPDATE users SET last_login = NOW() WHERE id = $1', [userId]);
     } catch (error) {
-      console.error('❌ Erro ao atualizar último login:', error);
+      console.error('Erro ao atualizar último login:', error);
     }
   }
 
-  // Método para criar usuário
+  // Criar usuário
   static async createUser(userData) {
-    try {
-      const { name, email, password, role, group_id } = userData;
-      const passwordHash = await this.hashPassword(password);
-      
-      const result = await pool.query(
-        `INSERT INTO users (name, email, password_hash, role, group_id) 
-         VALUES ($1, $2, $3, $4, $5) 
-         RETURNING id, name, email, role, group_id, created_at`,
-        [name, email, passwordHash, role, group_id]
-      );
-      
-      console.log('✅ Usuário criado:', name);
-      return result.rows[0];
-    } catch (error) {
-      console.error('❌ Erro ao criar usuário:', error);
-      throw error;
-    }
+    const { name, email, password, role, group_id } = userData;
+    const passwordHash = await this.hashPassword(password);
+    
+    const result = await pool.query(
+      `INSERT INTO users (name, email, password_hash, role, group_id) 
+       VALUES ($1, $2, $3, $4, $5) 
+       RETURNING id, name, email, role, group_id, created_at`,
+      [name, email, passwordHash, role, group_id]
+    );
+    return result.rows[0];
   }
 
-  // Método para corrigir senha de usuário
+  // Corrigir senha (mantido para uso manual/admin se necessário)
   static async fixUserPassword(userId, plainPassword = '123456') {
-    try {
-      console.log(`🔧 Corrigindo senha para usuário ${userId}...`);
-      
-      const hashedPassword = await this.hashPassword(plainPassword);
-      
-      const result = await pool.query(
-        'UPDATE users SET password_hash = $1 WHERE id = $2 RETURNING id, name, email',
-        [hashedPassword, userId]
-      );
-      
-      console.log(`✅ Senha corrigida para: ${result.rows[0].name}`);
-      return result.rows[0];
-    } catch (error) {
-      console.error('❌ Erro ao corrigir senha:', error);
-      throw error;
-    }
+    const hashedPassword = await this.hashPassword(plainPassword);
+    // Também reseta as tentativas falhas ao redefinir a senha
+    const result = await pool.query(
+      'UPDATE users SET password_hash = $1, failed_login_attempts = 0, lockout_until = NULL WHERE id = $2 RETURNING id, name, email',
+      [hashedPassword, userId]
+    );
+    return result.rows[0];
   }
-
-  // Método para corrigir todas as senhas
+  
+  // Corrigir todas as senhas (método de utilidade)
   static async fixAllPasswords() {
     try {
-      console.log('🔧 Corrigindo todas as senhas...');
-      
-      const users = await pool.query('SELECT id, name, email FROM users');
-      
+      const users = await pool.query('SELECT id FROM users');
       for (const user of users.rows) {
         await this.fixUserPassword(user.id, '123456');
       }
-      
-      console.log('🎉 Todas as senhas foram corrigidas!');
     } catch (error) {
-      console.error('❌ Erro ao corrigir senhas:', error);
+      console.error('Erro ao corrigir senhas:', error);
     }
   }
 
-  // Método para criar tabela de sessões
+  // Criar tabela de sessões
   static async createSessionsTable() {
-    try {
-      console.log('🗃️ Criando tabela user_sessions...');
-      
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS user_sessions (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-          session_token VARCHAR(255) UNIQUE NOT NULL,
-          expires_at TIMESTAMP NOT NULL,
-          created_at TIMESTAMP DEFAULT NOW()
-        )
-      `);
-      
-      console.log('✅ Tabela user_sessions criada/verificada');
-    } catch (error) {
-      console.error('❌ Erro ao criar tabela user_sessions:', error);
-      throw error;
-    }
-  }
-
-  // Método para verificar estrutura do banco
-  static async checkDatabaseStructure() {
-    try {
-      const usersColumns = await pool.query(`
-        SELECT column_name, data_type, is_nullable
-        FROM information_schema.columns 
-        WHERE table_name = 'users'
-        ORDER BY ordinal_position
-      `);
-
-      const sessionsColumns = await pool.query(`
-        SELECT column_name, data_type, is_nullable
-        FROM information_schema.columns 
-        WHERE table_name = 'user_sessions'
-        ORDER BY ordinal_position
-      `);
-
-      console.log('📊 Estrutura da tabela users:', usersColumns.rows);
-      console.log('📊 Estrutura da tabela user_sessions:', sessionsColumns.rows);
-
-      return {
-        users: usersColumns.rows,
-        sessions: sessionsColumns.rows
-      };
-    } catch (error) {
-      console.error('❌ Erro ao verificar estrutura do banco:', error);
-      throw error;
-    }
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        session_token VARCHAR(255) UNIQUE NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
   }
 }
 
-// Exportar a classe e a pool para uso externo
 module.exports = Auth;
-module.exports.pool = pool; // Para acesso direto à pool se necessário
+module.exports.pool = pool;

@@ -8,11 +8,15 @@ class Group {
 
   static async create(groupData) {
     const { name, description } = groupData;
+    
+    // Converte string vazia para NULL para manter o banco limpo
+    const desc = description ? description : null;
+
     const result = await pool.query(`
       INSERT INTO groups (name, description)
       VALUES ($1, $2)
       RETURNING *
-    `, [name, description]);
+    `, [name, desc]);
     return result.rows[0];
   }
 

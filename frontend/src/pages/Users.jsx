@@ -1,17 +1,38 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit3, Shield, User, Mail, Lock, Save, X } from 'lucide-react';
+import { api } from '../services/api'; // Certifique-se que o caminho está correto
 
 const UsersView = ({ users, groups, onSubmit, onDelete, onUpdate }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
+  const [availableRoles, setAvailableRoles] = useState([]); // Estado para as Roles dinâmicas
+
   const [newUser, setNewUser] = useState({ 
     name: '', 
     email: '', 
     password: '',
     confirmPassword: '',
-    role: 'tecnico', 
+    role: 'usuario', // Valor padrão inicial
     group_id: '' 
   });
+
+  // Busca as roles do banco de dados ao carregar a tela
+  useEffect(() => {
+    const fetchRoles = async () => {
+      try {
+        const rolesData = await api.getRoles();
+        setAvailableRoles(rolesData);
+        
+        // Se houver roles, define a primeira como padrão
+        if (rolesData.length > 0) {
+          setNewUser(prev => ({ ...prev, role: rolesData[0].name }));
+        }
+      } catch (error) {
+        console.error('Erro ao carregar roles:', error);
+      }
+    };
+    fetchRoles();
+  }, []);
 
   const inputClass = "w-full bg-[#0e1525] border border-slate-700 text-white text-xs rounded px-3 py-2 focus:outline-none focus:border-[#86efac] transition-all";
 
@@ -36,7 +57,7 @@ const UsersView = ({ users, groups, onSubmit, onDelete, onUpdate }) => {
         email: '', 
         password: '',
         confirmPassword: '',
-        role: 'tecnico', 
+        role: availableRoles[0]?.name || 'usuario', 
         group_id: '' 
       });
     } catch (error) {
@@ -67,16 +88,25 @@ const UsersView = ({ users, groups, onSubmit, onDelete, onUpdate }) => {
     return group ? group.name : 'Sem Grupo';
   };
 
-  const getRoleBadge = (role) => {
+  const getRoleBadge = (roleName) => {
+    // Tenta encontrar o label legível da role
+    const roleObj = availableRoles.find(r => r.name === roleName);
+    const label = roleObj ? roleObj.label : roleName?.toUpperCase();
+
+    // Estilos pré-definidos para as roles padrão
     const styles = {
       admin: 'bg-red-500/20 text-red-400 border-red-500/30',
       tecnico: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-      usuario: 'bg-green-500/20 text-green-400 border-green-500/30'
+      usuario: 'bg-green-500/20 text-green-400 border-green-500/30',
+      // Estilo padrão para roles personalizadas (roxo)
+      default: 'bg-purple-500/20 text-purple-400 border-purple-500/30'
     };
 
+    const styleClass = styles[roleName] || styles.default;
+
     return (
-      <span className={`px-2 py-1 rounded border text-xs font-medium ${styles[role] || styles.usuario}`}>
-        {role.toUpperCase()}
+      <span className={`px-2 py-1 rounded border text-xs font-medium ${styleClass}`}>
+        {label}
       </span>
     );
   };
@@ -124,7 +154,7 @@ const UsersView = ({ users, groups, onSubmit, onDelete, onUpdate }) => {
                 <input 
                   required 
                   type="email" 
-                  placeholder="email@empresa.com"
+                  placeholder="email@solve.com"
                   className={inputClass}
                   value={newUser.email}
                   onChange={e => setNewUser({...newUser, email: e.target.value})}
@@ -167,9 +197,12 @@ const UsersView = ({ users, groups, onSubmit, onDelete, onUpdate }) => {
                   value={newUser.role}
                   onChange={e => setNewUser({...newUser, role: e.target.value})}
                 >
-                  <option value="usuario">Usuário</option>
-                  <option value="tecnico">Técnico</option>
-                  <option value="admin">Administrador</option>
+                  <option value="" disabled>Selecione um cargo...</option>
+                  {availableRoles.map(role => (
+                    <option key={role.id} value={role.name}>
+                      {role.label}
+                    </option>
+                  ))}
                 </select>
               </div>
               
@@ -216,39 +249,53 @@ const UsersView = ({ users, groups, onSubmit, onDelete, onUpdate }) => {
               // Modo Edição
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    type="text"
-                    className={inputClass}
-                    value={editingUser.name}
-                    onChange={e => setEditingUser({...editingUser, name: e.target.value})}
-                  />
-                  <input
-                    type="email"
-                    className={inputClass}
-                    value={editingUser.email}
-                    onChange={e => setEditingUser({...editingUser, email: e.target.value})}
-                  />
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Nome</label>
+                    <input
+                      type="text"
+                      className={inputClass}
+                      value={editingUser.name}
+                      onChange={e => setEditingUser({...editingUser, name: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Email</label>
+                    <input
+                      type="email"
+                      className={inputClass}
+                      value={editingUser.email}
+                      onChange={e => setEditingUser({...editingUser, email: e.target.value})}
+                    />
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <select
-                    className={inputClass}
-                    value={editingUser.role}
-                    onChange={e => setEditingUser({...editingUser, role: e.target.value})}
-                  >
-                    <option value="usuario">Usuário</option>
-                    <option value="tecnico">Técnico</option>
-                    <option value="admin">Administrador</option>
-                  </select>
-                  <select
-                    className={inputClass}
-                    value={editingUser.group_id}
-                    onChange={e => setEditingUser({...editingUser, group_id: e.target.value})}
-                  >
-                    <option value="">Sem Grupo</option>
-                    {groups.map(group => (
-                      <option key={group.id} value={group.id}>{group.name}</option>
-                    ))}
-                  </select>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Cargo</label>
+                    <select
+                      className={inputClass}
+                      value={editingUser.role}
+                      onChange={e => setEditingUser({...editingUser, role: e.target.value})}
+                    >
+                      {availableRoles.map(role => (
+                        <option key={role.id} value={role.name}>
+                          {role.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Grupo</label>
+                    <select
+                      className={inputClass}
+                      value={editingUser.group_id || ''}
+                      onChange={e => setEditingUser({...editingUser, group_id: e.target.value})}
+                    >
+                      <option value="">Sem Grupo</option>
+                      {groups.map(group => (
+                        <option key={group.id} value={group.id}>{group.name}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <div className="flex justify-end gap-2">
                   <button

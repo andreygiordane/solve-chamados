@@ -1,234 +1,199 @@
 import React, { useState } from 'react';
 import { 
-  LayoutDashboard, 
-  Ticket, 
-  Plus, 
-  List, 
-  FileText, 
-  Settings, 
-  Server, 
-  Users, 
-  Shield, 
-  LogOut,
-  ChevronDown,
-  ChevronRight,
-  User,
-  Lock
+  LayoutDashboard, Ticket, Plus, List, FileText, Settings, Server, 
+  Users, Shield, LogOut, ChevronDown, ChevronRight, Lock, Key, 
+  Home, X 
 } from 'lucide-react';
-import SolveLogo from '../ui/SolveLogo.jsx';
 import SidebarItem from './SidebarItem.jsx';
 import { SubMenuItem } from './SidebarItem.jsx';
 
-const Sidebar = ({ view, setView, user, onLogout }) => {
+const Sidebar = ({ view, setView, user, onLogout, isOpen, onClose }) => {
   const [expandedMenu, setExpandedMenu] = useState({ 
     chamados: true, 
-    cadastros: false,
     admin: false 
   });
 
   const toggleMenu = (key) => setExpandedMenu(prev => ({ ...prev, [key]: !prev[key] }));
 
-  // Verificar permissões do usuário
+  // Helper para fechar o menu ao clicar em um item (apenas mobile)
+  const handleNavigation = (newView) => {
+    setView(newView);
+    onClose();
+  };
+
+  // Helper para verificar permissões
+  const hasPermission = (permission) => {
+    if (user?.role === 'admin') return true;
+    return user?.permissions?.includes(permission);
+  };
+
   const isAdmin = user?.role === 'admin';
-  const isTecnico = user?.role === 'tecnico' || isAdmin;
-  const canManageUsers = isAdmin;
-  const canManageGroups = isAdmin;
-  const canManageAssets = isTecnico;
+  const isTecnico = ['admin', 'tecnico', 'tecnico_n3'].includes(user?.role);
+
+  // Regras de Visualização
+  const showDashboard = isTecnico; 
+  const showAssets = isAdmin || isTecnico || hasPermission('manage_assets');
+  const showUsers = isAdmin || hasPermission('manage_users');
+  const showGroups = isAdmin || hasPermission('manage_groups');
+  const showRoles = isAdmin || hasPermission('manage_roles');
+  const showAdminSection = showAssets || showUsers || showGroups || showRoles;
 
   return (
-    <aside className="w-64 bg-[#0B1A38] flex flex-col fixed h-full z-20 shadow-xl border-r border-slate-800/50 print:hidden">
-      {/* Logo */}
-      <div className="h-24 flex items-center justify-center border-b border-white/10">
-        <SolveLogo />
-      </div>
-      
-      {/* Info do Usuário */}
-      <div className="p-4 bg-[#081226] flex items-center gap-3 border-b border-white/5">
-        <div className="w-10 h-10 rounded-full bg-[#86efac] text-[#0B1A38] flex items-center justify-center font-bold shadow-lg text-sm">
-          {user?.name?.charAt(0)?.toUpperCase() || 'U'}
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold truncate text-white">{user?.name || 'Usuário'}</p>
-          <div className="flex items-center gap-1">
-            <p className="text-xs text-slate-400 capitalize">{user?.role || 'user'}</p>
-            {isAdmin && (
-              <Lock className="w-3 h-3 text-yellow-400" />
-            )}
-          </div>
-        </div>
-      </div>
-      
-      {/* Navegação */}
-      <nav className="flex-1 overflow-y-auto py-4 space-y-1">
-        {/* Dashboard */}
-        <SidebarItem 
-          icon={LayoutDashboard} 
-          label="DASHBOARD" 
-          active={view === 'dashboard'} 
-          onClick={() => setView('dashboard')} 
+    <>
+      {/* --- OVERLAY (Fundo escuro no mobile) --- */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-30 md:hidden backdrop-blur-sm transition-opacity"
+          onClick={onClose}
         />
+      )}
+
+      {/* --- SIDEBAR --- */}
+      <aside className={`
+        fixed inset-y-0 left-0 z-40 w-64 bg-[#0B1A38] flex flex-col 
+        shadow-xl border-r border-slate-800/50 print:hidden
+        transition-transform duration-300 ease-in-out
+        ${isOpen ? 'translate-x-0' : '-translate-x-full'} 
+        md:translate-x-0 
+      `}>
         
-        {/* Chamados */}
-        <div>
-          <button 
-            onClick={() => toggleMenu('chamados')} 
-            className={`w-full flex items-center justify-between px-6 py-3 text-sm font-medium transition-colors hover:bg-white/5 ${
-              view.includes('ticket') || view === 'reports' ? 'text-white' : 'text-slate-400'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <Ticket className="w-5 h-5" />
-              <span>CHAMADOS</span>
-            </div>
-            {expandedMenu.chamados ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-          </button>
+        {/* --- ÁREA DA LOGOMARCA --- */}
+        <div className="h-28 flex items-center justify-center border-b border-white/15 gap-4 bg-gradient-to-b from-[#0e1525] to-[#0B1A38] px-4 relative">
+          <img 
+            src="/image/logo.svg" 
+            alt="Logo Solve" 
+            className="w-40 h-40 rounded-xl hover:scale-105 transition-transform duration-300" 
+          />
           
-          {expandedMenu.chamados && (
-            <div className="bg-[#081226] py-2">
-              <SubMenuItem 
-                active={view === 'new-ticket'} 
-                onClick={() => setView('new-ticket')} 
-                icon={Plus} 
-                label="ABRIR CHAMADO" 
-              />
-              <SubMenuItem 
-                active={view === 'tickets'} 
-                onClick={() => setView('tickets')} 
-                icon={List} 
-                label="LISTA DE CHAMADOS" 
-              />
-              <SubMenuItem 
-                active={view === 'reports'} 
-                onClick={() => setView('reports')} 
-                icon={FileText} 
-                label="RELATÓRIO GERAL" 
-              />
-            </div>
-          )}
+          {/* Botão Fechar (Apenas Mobile) */}
+          <button 
+            onClick={onClose}
+            className="md:hidden absolute top-2 right-2 p-1 text-slate-400 hover:text-white"
+          >
+            <X className="w-6 h-6" />
+          </button>
         </div>
-
-        {/* Cadastros - Apenas para técnicos e admin */}
-        {(isTecnico || canManageAssets || canManageUsers) && (
-          <div>
-            <button 
-              onClick={() => toggleMenu('cadastros')} 
-              className="w-full flex items-center justify-between px-6 py-3 text-sm font-medium text-slate-400 hover:bg-white/5 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <Settings className="w-5 h-5" />
-                <span>CADASTROS</span>
-              </div>
-              {expandedMenu.cadastros ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-            </button>
-            
-            {expandedMenu.cadastros && (
-              <div className="bg-[#081226] py-2">
-                {/* Equipamentos - Apenas técnicos e admin */}
-                {(isTecnico || canManageAssets) && (
-                  <SubMenuItem 
-                    active={view === 'assets'} 
-                    onClick={() => setView('assets')} 
-                    icon={Server} 
-                    label="EQUIPAMENTOS" 
-                  />
-                )}
-                
-                {/* Usuários - Apenas admin */}
-                {canManageUsers && (
-                  <SubMenuItem 
-                    active={view === 'users'} 
-                    onClick={() => setView('users')} 
-                    icon={Users} 
-                    label="USUÁRIOS" 
-                  />
-                )}
-                
-                {/* Grupos - Apenas admin */}
-                {canManageGroups && (
-                  <SubMenuItem 
-                    active={view === 'groups'} 
-                    onClick={() => setView('groups')} 
-                    icon={Shield} 
-                    label="GRUPOS" 
-                  />
-                )}
-              </div>
-            )}
+        
+        {/* Info do Usuário */}
+        <button 
+          onClick={() => handleNavigation('profile')}
+          className="w-full p-4 bg-[#081226] flex items-center gap-3 border-b border-white/5 hover:bg-[#101d36] transition-colors text-left group"
+          title="Ir para Meu Perfil"
+        >
+          <div className="w-10 h-10 rounded-full bg-[#86efac] text-[#0B1A38] flex items-center justify-center font-bold shadow-lg text-sm group-hover:scale-105 transition-transform border-2 border-[#0B1A38] ring-2 ring-[#86efac]/20">
+            {user?.name?.charAt(0)?.toUpperCase() || 'U'}
           </div>
-        )}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold truncate text-white group-hover:text-[#86efac] transition-colors">
+              {user?.name || 'Usuário'}
+            </p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wide bg-slate-800 px-1.5 py-0.5 rounded">
+                {user?.role_label || user?.role || 'user'}
+              </p>
+              {isAdmin && <Lock className="w-3 h-3 text-yellow-400" />}
+            </div>
+          </div>
+        </button>
+        
+        {/* Navegação */}
+        <nav className="flex-1 overflow-y-auto py-4 space-y-1 custom-scrollbar">
+          
+          <SidebarItem 
+            icon={Home} 
+            label="INÍCIO" 
+            active={view === 'home'} 
+            onClick={() => handleNavigation('home')} 
+          />
 
-        {/* Menu Admin - Apenas para administradores */}
-        {isAdmin && (
+          {showDashboard && (
+            <SidebarItem 
+              icon={LayoutDashboard} 
+              label="DASHBOARD" 
+              active={view === 'dashboard'} 
+              onClick={() => handleNavigation('dashboard')} 
+            />
+          )}
+          
+          {/* Menu Chamados */}
           <div>
             <button 
-              onClick={() => toggleMenu('admin')} 
-              className="w-full flex items-center justify-between px-6 py-3 text-sm font-medium text-yellow-400 hover:bg-white/5 transition-colors"
+              onClick={() => toggleMenu('chamados')} 
+              className={`w-full flex items-center justify-between px-6 py-3 text-sm font-medium transition-colors hover:bg-white/5 ${
+                view.includes('ticket') || view === 'reports' ? 'text-white' : 'text-slate-400'
+              }`}
             >
               <div className="flex items-center gap-3">
-                <Shield className="w-5 h-5" />
-                <span>ADMIN</span>
+                <Ticket className="w-5 h-5" />
+                <span>CHAMADOS</span>
               </div>
-              {expandedMenu.admin ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+              {expandedMenu.chamados ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
             </button>
             
-            {expandedMenu.admin && (
-              <div className="bg-[#081226] py-2">
+            {expandedMenu.chamados && (
+              <div className="bg-[#050b1a] py-2 shadow-inner">
                 <SubMenuItem 
-                  active={view === 'users'} 
-                  onClick={() => setView('users')} 
-                  icon={Users} 
-                  label="GERENCIAR USUÁRIOS" 
+                  active={view === 'new-ticket'} 
+                  onClick={() => handleNavigation('new-ticket')} 
+                  icon={Plus} 
+                  label="ABRIR CHAMADO" 
                 />
                 <SubMenuItem 
-                  active={view === 'groups'} 
-                  onClick={() => setView('groups')} 
-                  icon={Shield} 
-                  label="GERENCIAR GRUPOS" 
+                  active={view === 'tickets'} 
+                  onClick={() => handleNavigation('tickets')} 
+                  icon={List} 
+                  label="LISTA DE CHAMADOS" 
                 />
                 <SubMenuItem 
                   active={view === 'reports'} 
-                  onClick={() => setView('reports')} 
+                  onClick={() => handleNavigation('reports')} 
                   icon={FileText} 
-                  label="RELATÓRIOS AVANÇADOS" 
+                  label="RELATÓRIO GERAL" 
                 />
               </div>
             )}
           </div>
-        )}
 
-        {/* Perfil do Usuário */}
-        <div className="pt-4 border-t border-white/10 mx-6">
-          <SidebarItem 
-            icon={User} 
-            label="MEU PERFIL" 
-            active={view === 'profile'} 
-            onClick={() => setView('profile')} 
-          />
-        </div>
-      </nav>
+          {/* Menu Administração */}
+          {showAdminSection && (
+            <div>
+              <button 
+                onClick={() => toggleMenu('admin')} 
+                className={`w-full flex items-center justify-between px-6 py-3 text-sm font-medium transition-colors hover:bg-white/5 ${
+                  ['assets', 'users', 'groups', 'roles'].includes(view) ? 'text-white' : 'text-slate-400'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Settings className="w-5 h-5" /> 
+                  <span>ADMINISTRAÇÃO</span>
+                </div>
+                {expandedMenu.admin ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+              </button>
+              
+              {expandedMenu.admin && (
+                <div className="bg-[#050b1a] py-2 shadow-inner">
+                  {showAssets && <SubMenuItem active={view === 'assets'} onClick={() => handleNavigation('assets')} icon={Server} label="EQUIPAMENTOS" />}
+                  {showUsers && <SubMenuItem active={view === 'users'} onClick={() => handleNavigation('users')} icon={Users} label="USUÁRIOS" />}
+                  {showGroups && <SubMenuItem active={view === 'groups'} onClick={() => handleNavigation('groups')} icon={Shield} label="GRUPOS DE ACESSO" />}
+                  {showRoles && <SubMenuItem active={view === 'roles'} onClick={() => handleNavigation('roles')} icon={Key} label="PERMISSÕES & CARGOS" />}
+                </div>
+              )}
+            </div>
+          )}
+        </nav>
 
-      {/* Botão Sair */}
-      <div className="p-4 bg-[#081226] border-t border-white/10">
-        <button 
-          onClick={onLogout}
-          className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white py-3 rounded-lg text-sm font-bold uppercase transition-colors shadow-lg"
-        >
-          <LogOut className="w-4 h-4" /> 
-          Sair do Sistema
-        </button>
-        
-        {/* Info da sessão */}
-        <div className="mt-3 text-center">
-          <p className="text-xs text-slate-500">
-            Logado como: <span className="text-slate-400 font-medium">{user?.name}</span>
-          </p>
-          <p className="text-[10px] text-slate-600 mt-1">
-            {user?.role === 'admin' ? 'Administrador' : 
-             user?.role === 'tecnico' ? 'Técnico' : 'Usuário'}
-          </p>
+        {/* Botão Sair */}
+        <div className="p-4 bg-[#081226] border-t border-white/10">
+          <button 
+            onClick={onLogout}
+            className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white py-3 rounded-lg text-sm font-bold uppercase transition-colors shadow-lg group"
+          >
+            <LogOut className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> 
+            Sair do Sistema
+          </button>
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 };
 

@@ -50,17 +50,28 @@ const DashboardTicketItem = ({ ticket, onClick }) => {
   );
 };
 
-const DashboardView = ({ tickets, setView, config, setConfig, showToast, handleOpenTicket }) => {
+// Adicionei currentUser nas props
+const DashboardView = ({ tickets, setView, config, setConfig, showToast, handleOpenTicket, currentUser }) => {
+  
+  // FILTRO DE PERMISSÃO
+  // Se for admin ou técnico, vê tudo. Se não, só vê os seus.
+  const userTickets = tickets.filter(t => {
+    const isStaff = ['admin', 'tecnico', 'tecnico_n3'].includes(currentUser?.role);
+    if (isStaff) return true;
+    return t.requester === currentUser?.name;
+  });
+
+  // Calculamos as estatísticas baseadas apenas nos tickets permitidos
   const stats = {
-    novos: tickets.filter(t => t.status === 'aberto').length,
-    pendentes: tickets.filter(t => t.status === 'pendente').length,
-    atendimento: tickets.filter(t => t.status === 'em_andamento').length,
-    solucionados: tickets.filter(t => t.status === 'concluido').length,
-    atrasados: tickets.filter(t => t.priority === 'critica' && t.status !== 'concluido').length,
-    cancelados: tickets.filter(t => t.status === 'cancelado').length
+    novos: userTickets.filter(t => t.status === 'aberto').length,
+    pendentes: userTickets.filter(t => t.status === 'pendente').length,
+    atendimento: userTickets.filter(t => t.status === 'em_andamento').length,
+    solucionados: userTickets.filter(t => t.status === 'concluido').length,
+    atrasados: userTickets.filter(t => t.priority === 'critica' && t.status !== 'concluido').length,
+    cancelados: userTickets.filter(t => t.status === 'cancelado').length
   };
 
-  const activeTickets = tickets.filter(t => t.status !== 'concluido' && t.status !== 'cancelado');
+  const activeTickets = userTickets.filter(t => t.status !== 'concluido' && t.status !== 'cancelado');
 
   const toggleNotifications = () => {
     const newState = !config.notifications;
@@ -76,6 +87,7 @@ const DashboardView = ({ tickets, setView, config, setConfig, showToast, handleO
 
   return (
     <div className="space-y-8">
+      {/* Cards de Estatísticas */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <DashboardCard title="Novos" count={stats.novos} color="bg-green-600" />
         <DashboardCard title="Pendentes" count={stats.pendentes} color="bg-orange-500" />
@@ -107,7 +119,7 @@ const DashboardView = ({ tickets, setView, config, setConfig, showToast, handleO
       <div className="space-y-3">
         {activeTickets.length === 0 ? (
           <div className="bg-[#1a2236] p-8 rounded text-center border border-white/5">
-            <p className="text-slate-500">Nenhum chamado ativo no momento.</p>
+            <p className="text-slate-500">Nenhum chamado ativo encontrado para seu perfil.</p>
             <button 
               onClick={() => setView('new-ticket')} 
               className="mt-4 text-blue-400 hover:underline text-sm"
