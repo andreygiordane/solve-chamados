@@ -5,6 +5,7 @@ const assetsRoutes = require('./routes/assets');
 const usersRoutes = require('./routes/users');
 const groupsRoutes = require('./routes/groups');
 const authRoutes = require('./routes/auth');
+const rolesRoutes = require('./routes/roles');
 const { authenticate } = require('./middleware/auth');
 
 const app = express();
@@ -12,18 +13,23 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+
+// --- AUMENTADO LIMITE PARA 10MB (IMAGENS) ---
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
+// --------------------------------------------
 
 // Rotas públicas
 app.use('/api/auth', authRoutes);
 
-// Rotas protegidas (aplicar middleware de autenticação)
+// Rotas protegidas
 app.use('/api/tickets', authenticate, ticketsRoutes);
 app.use('/api/assets', authenticate, assetsRoutes);
 app.use('/api/users', authenticate, usersRoutes);
 app.use('/api/groups', authenticate, groupsRoutes);
+app.use('/api/roles', authenticate, rolesRoutes);
 
-// Rota de health check (pública)
+// Rota de health check
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
@@ -35,23 +41,18 @@ app.get('/api/health', (req, res) => {
 // Middleware de erro
 app.use((error, req, res, next) => {
   console.error('Erro não tratado:', error);
-  res.status(500).json({ 
-    success: false,
-    error: 'Erro interno do servidor' 
-  });
+  if (error.type === 'entity.too.large') {
+    return res.status(413).json({ success: false, error: 'Arquivo muito grande (Máx 10MB)' });
+  }
+  res.status(500).json({ success: false, error: 'Erro interno do servidor' });
 });
 
 // Rota não encontrada
 app.use('*', (req, res) => {
-  res.status(404).json({ 
-    success: false,
-    error: 'Rota não encontrada' 
-  });
+  res.status(404).json({ success: false, error: 'Rota não encontrada' });
 });
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor backend rodando na porta ${PORT}`);
   console.log(`🔐 Sistema de autenticação ativo`);
-  console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`⏰ Iniciado em: ${new Date().toLocaleString()}`);
 });

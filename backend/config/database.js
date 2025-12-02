@@ -6,6 +6,7 @@ const pool = new Pool({
   database: 'solve_chamados',
   password: '951405',
   port: 5432,
+  client_encoding: 'UTF8', 
 });
 
 // Testar conexão
@@ -15,6 +16,7 @@ pool.on('connect', () => {
 
 pool.on('error', (err) => {
   console.error('❌ Erro na conexão PostgreSQL:', err);
+  process.exit(-1);
 });
 
 module.exports = pool;

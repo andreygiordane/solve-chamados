@@ -18,112 +18,82 @@ const login = async (req, res) => {
 
     // Buscar usuário
     const user = await Auth.findUserByEmail(email);
-    console.log('👤 [LOGIN] Usuário encontrado:', user ? `Sim (ID: ${user.id})` : 'Não');
 
     if (!user) {
+      // Por segurança, não informamos que o email não existe
       return res.status(401).json({ 
         success: false, 
-        message: 'Usuário não encontrado' 
+        message: 'Email ou senha inválidos' 
       });
     }
 
-    // DEBUG DETALHADO
-    console.log('🔍 DEBUG DETALHADO:');
-    console.log('   User ID:', user.id);
-    console.log('   User Name:', user.name);
-    console.log('   Password Hash:', user.password_hash);
-    console.log('   Hash Length:', user.password_hash?.length);
-    console.log('   Hash Type:', typeof user.password_hash);
+    // === 1. VERIFICAR SE A CONTA ESTÁ BLOQUEADA ===
+    if (user.lockout_until) {
+      const lockoutTime = new Date(user.lockout_until);
+      const now = new Date();
+
+      if (lockoutTime > now) {
+        const waitMinutes = Math.ceil((lockoutTime - now) / 60000); // Minutos restantes
+        console.log(`🚫 Usuário ${email} está bloqueado por mais ${waitMinutes} minutos`);
+        
+        return res.status(403).json({
+          success: false,
+          message: `Conta bloqueada temporariamente devido a muitas tentativas falhas. Tente novamente em ${waitMinutes} minutos.`
+        });
+      }
+    }
 
     // Verificar se usuário está ativo
     if (user.is_active === false) {
-      console.log('❌ [LOGIN] Usuário inativo');
       return res.status(401).json({ 
         success: false, 
         message: 'Usuário desativado' 
       });
     }
 
-    // Verificar se usuário tem senha definida
-    if (!user.password_hash) {
-      console.log('❌ [LOGIN] Usuário sem senha hash');
-      
-      // Tentar corrigir automaticamente
-      console.log('🔄 Tentando corrigir senha automaticamente...');
-      try {
-        await Auth.fixUserPassword(user.id, '123456');
-        
-        // Buscar usuário novamente após correção
-        const updatedUser = await Auth.findUserByEmail(email);
-        if (updatedUser && updatedUser.password_hash) {
-          console.log('✅ Senha corrigida automaticamente');
-          user.password_hash = updatedUser.password_hash;
-        }
-      } catch (fixError) {
-        console.log('❌ Falha ao corrigir senha automaticamente:', fixError);
-      }
-    }
-
-    // Se ainda não tem senha após tentativa de correção
-    if (!user.password_hash) {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Usuário não possui senha definida. Use a rota /fix-passwords primeiro.' 
-      });
-    }
-
-    console.log('🔑 [LOGIN] Verificando senha...');
-    
-    // TESTE DO BCRYPT
-    const testHash = await bcrypt.hash('123456', 10);
-    console.log('   Test Hash:', testHash.substring(0, 20) + '...');
-    console.log('   Test Hash Length:', testHash.length);
-
-    const testCompare = await bcrypt.compare('123456', testHash);
-    console.log('   Test Compare Result:', testCompare);
-
-    // Verificar senha do usuário
+    // === 2. VERIFICAR SENHA ===
     const isPasswordValid = await Auth.verifyPassword(password, user.password_hash);
-    console.log('✅ [LOGIN] Senha válida:', isPasswordValid);
 
     if (!isPasswordValid) {
-      console.log('❌ [LOGIN] Senha incorreta');
+      console.log(`❌ [LOGIN] Senha incorreta para ${email}`);
       
-      // Tentar corrigir a senha se estiver incorreta
-      console.log('🔄 Tentando corrigir senha...');
-      try {
-        await Auth.fixUserPassword(user.id, '123456');
-        console.log('✅ Senha corrigida, tente fazer login novamente');
-      } catch (fixError) {
-        console.log('❌ Falha ao corrigir senha:', fixError);
+      // Incrementar tentativas falhas e verificar se bloqueou
+      const result = await Auth.incrementFailedAttempts(user.id);
+      
+      if (result.locked) {
+        console.log(`🚫 Usuário ${email} acabou de ser bloqueado`);
+        return res.status(403).json({
+          success: false,
+          message: 'Muitas tentativas falhas. Sua conta foi bloqueada por 15 minutos.'
+        });
       }
-      
+
+      const attemptsLeft = 3 - result.attempts;
       return res.status(401).json({ 
         success: false, 
-        message: 'Senha incorreta. A senha foi reinicializada para "123456". Tente novamente.' 
+        message: `Senha incorreta. Você tem mais ${attemptsLeft} tentativa(s) antes do bloqueio temporário.` 
       });
     }
 
-    // Criar sessão
-    console.log('📝 [LOGIN] Criando sessão...');
-    const session = await Auth.createSession(user.id);
+    // === 3. LOGIN BEM SUCEDIDO ===
     
-    // Atualizar último login
+    // Resetar o contador de falhas (importante!)
+    await Auth.resetFailedAttempts(user.id);
+
+    // Criar sessão
+    const session = await Auth.createSession(user.id);
     await Auth.updateLastLogin(user.id);
 
-    // Remover dados sensíveis
     const userResponse = {
       id: user.id,
       name: user.name,
       email: user.email,
       role: user.role,
       group_id: user.group_id,
-      group_name: user.group_name,
-      last_login: user.last_login
+      group_name: user.group_name
     };
 
-    console.log('🎉 [LOGIN] Login realizado com sucesso para:', user.email);
-    console.log('🔑 [LOGIN] Token da sessão:', session.session_token.substring(0, 20) + '...');
+    console.log('🎉 [LOGIN] Sucesso para:', email);
 
     res.json({
       success: true,
@@ -137,18 +107,9 @@ const login = async (req, res) => {
 
   } catch (error) {
     console.error('💥 [LOGIN] Erro completo:', error);
-    
-    // Erro mais específico
-    if (error.message.includes('user_sessions')) {
-      return res.status(500).json({ 
-        success: false, 
-        message: 'Erro de configuração do banco. Execute a rota /fix-passwords primeiro.' 
-      });
-    }
-    
     res.status(500).json({ 
       success: false, 
-      message: 'Erro interno do servidor: ' + error.message 
+      message: 'Erro interno do servidor' 
     });
   }
 };
@@ -157,22 +118,12 @@ const login = async (req, res) => {
 const logout = async (req, res) => {
   try {
     const token = req.headers.authorization?.replace('Bearer ', '');
-    
     if (token) {
       await Auth.deleteSession(token);
     }
-
-    res.json({
-      success: true,
-      message: 'Logout realizado com sucesso'
-    });
-
+    res.json({ success: true, message: 'Logout realizado com sucesso' });
   } catch (error) {
-    console.error('Erro no logout:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Erro interno do servidor' 
-    });
+    res.status(500).json({ success: false, message: 'Erro interno do servidor' });
   }
 };
 
@@ -180,13 +131,7 @@ const logout = async (req, res) => {
 const getProfile = async (req, res) => {
   try {
     const user = await Auth.findUserById(req.user.id);
-    
-    if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Usuário não encontrado' 
-      });
-    }
+    if (!user) return res.status(404).json({ success: false, message: 'Usuário não encontrado' });
 
     const userResponse = {
       id: user.id,
@@ -199,17 +144,9 @@ const getProfile = async (req, res) => {
       created_at: user.created_at
     };
 
-    res.json({
-      success: true,
-      user: userResponse
-    });
-
+    res.json({ success: true, user: userResponse });
   } catch (error) {
-    console.error('Erro ao buscar perfil:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Erro interno do servidor' 
-    });
+    res.status(500).json({ success: false, message: 'Erro interno do servidor' });
   }
 };
 
@@ -217,34 +154,21 @@ const getProfile = async (req, res) => {
 const validateSession = async (req, res) => {
   try {
     const user = await Auth.findUserById(req.user.id);
-    
-    if (!user) {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Usuário não encontrado' 
-      });
-    }
-
-    const userResponse = {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      group_id: user.group_id,
-      group_name: user.group_name
-    };
+    if (!user) return res.status(401).json({ success: false, message: 'Usuário não encontrado' });
 
     res.json({
       success: true,
-      user: userResponse
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        group_id: user.group_id,
+        group_name: user.group_name
+      }
     });
-
   } catch (error) {
-    console.error('Erro ao validar sessão:', error);
-    res.status(401).json({ 
-      success: false, 
-      message: 'Sessão inválida' 
-    });
+    res.status(401).json({ success: false, message: 'Sessão inválida' });
   }
 };
 
@@ -252,179 +176,62 @@ const validateSession = async (req, res) => {
 const register = async (req, res) => {
   try {
     const { name, email, password, role, group_id } = req.body;
+    if (!name || !email || !password) return res.status(400).json({ success: false, message: 'Dados incompletos' });
 
-    // Validar entrada
-    if (!name || !email || !password) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Nome, email e senha são obrigatórios' 
-      });
-    }
-
-    // Verificar se email já existe
     const existingUser = await Auth.findUserByEmail(email);
-    if (existingUser) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Email já cadastrado' 
-      });
-    }
+    if (existingUser) return res.status(400).json({ success: false, message: 'Email já cadastrado' });
 
-    // Criar usuário
-    const user = await Auth.createUser({
-      name,
-      email,
-      password,
-      role: role || 'tecnico',
-      group_id: group_id || null
-    });
+    const user = await Auth.createUser({ name, email, password, role: role || 'tecnico', group_id: group_id || null });
 
-    res.status(201).json({
-      success: true,
-      message: 'Usuário criado com sucesso',
-      user: user
-    });
-
+    res.status(201).json({ success: true, message: 'Usuário criado', user });
   } catch (error) {
-    console.error('Erro no registro:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Erro interno do servidor' 
-    });
+    res.status(500).json({ success: false, message: 'Erro interno do servidor' });
   }
 };
 
-// Função de diagnóstico
+// Função de diagnóstico (Simplificada para manter compatibilidade)
 const diagnose = async (req, res) => {
   try {
     const { email } = req.query;
+    if (!email) return res.status(400).json({ success: false, message: 'Email obrigatório' });
     
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email é obrigatório para diagnóstico'
-      });
-    }
-    
-    // Buscar usuário diretamente
     const user = await Auth.findUserByEmail(email);
-    
-    if (!user) {
-      return res.json({
-        success: true,
-        diagnosis: {
-          exists: false,
-          message: 'Usuário não encontrado'
-        }
-      });
-    }
-
-    // Testar senha
-    let passwordTest = 'Não testado';
-    try {
-      if (user.password_hash) {
-        const testResult = await bcrypt.compare('123456', user.password_hash);
-        passwordTest = testResult ? '✅ Válida' : '❌ Inválida';
-      } else {
-        passwordTest = '❌ Sem senha';
-      }
-    } catch (testError) {
-      passwordTest = `❌ Erro: ${testError.message}`;
-    }
-
-    const diagnosis = {
-      exists: true,
-      hasPassword: !!user.password_hash,
-      passwordLength: user.password_hash ? user.password_hash.length : 0,
-      passwordTest: passwordTest,
-      isActive: user.is_active !== false,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role
-      },
-      database: {
-        hasSessionsTable: true, // Assumindo que existe após correção
-        connection: '✅ OK'
-      }
-    };
+    if (!user) return res.json({ success: true, diagnosis: { exists: false } });
 
     res.json({
       success: true,
-      diagnosis
+      diagnosis: {
+        exists: true,
+        hasPassword: !!user.password_hash,
+        isLocked: !!user.lockout_until,
+        failedAttempts: user.failed_login_attempts || 0
+      }
     });
-
   } catch (error) {
-    console.error('Erro no diagnóstico:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// Novo método para corrigir senhas
+// Correção de senhas em massa
 const fixPasswords = async (req, res) => {
   try {
-    console.log('🔧 Iniciando correção de senhas...');
-    
     await Auth.fixAllPasswords();
-    
-    // Verificar resultado
-    const users = await Auth.pool.query('SELECT id, name, email, LENGTH(password_hash) as pwd_len FROM users');
-    
-    res.json({
-      success: true,
-      message: 'Senhas corrigidas com sucesso!',
-      results: users.rows.map(user => ({
-        name: user.name,
-        email: user.email,
-        password_length: user.pwd_len,
-        status: user.pwd_len === 60 ? '✅ CORRETO' : '❌ INCORRETO'
-      }))
-    });
+    res.json({ success: true, message: 'Senhas corrigidas e bloqueios resetados' });
   } catch (error) {
-    console.error('Erro ao corrigir senhas:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao corrigir senhas: ' + error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Método para criar tabelas se não existirem
+// Setup do banco
 const setupDatabase = async (req, res) => {
   try {
-    console.log('🗃️ Configurando banco de dados...');
-    
-    // Criar tabela de sessões se não existir
-    await Auth.pool.query(`
-      CREATE TABLE IF NOT EXISTS user_sessions (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        session_token VARCHAR(255) UNIQUE NOT NULL,
-        expires_at TIMESTAMP NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `);
-    
-    console.log('✅ Tabela user_sessions verificada/criada');
-    
-    res.json({
-      success: true,
-      message: 'Banco de dados configurado com sucesso'
-    });
+    await Auth.createSessionsTable();
+    res.json({ success: true, message: 'Banco configurado' });
   } catch (error) {
-    console.error('Erro na configuração do banco:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro na configuração: ' + error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Exportar todas as funções
 module.exports = {
   login,
   logout,
